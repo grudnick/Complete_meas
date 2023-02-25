@@ -1,4 +1,4 @@
-# Complete_meas
+# README
 This is a program to measure the spectroscopic completeness in the fields of the wide-field EDisCS data. 
 
 This is not a general code but is rather designed to work with the specific LDP catalog format.
