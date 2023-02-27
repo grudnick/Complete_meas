@@ -95,7 +95,9 @@ class complete:
 
     
     def __init__(self, ldppath):
-        self.cat = fits.getdata(ldppath + 'v7.2/megacat_v7.2a.fits')
+        catname = ldppath + 'v7.2/megacat_v7.2a.fits'
+        self.cat = fits.getdata(catname)
+       
 
         #correct for galactic extinction
         #use the following formula F_obs(Lambda) = F_0(Lambda) * 10^(-0.4 * EBV * K(Lambda))
@@ -107,8 +109,40 @@ class complete:
                     'z' : 1.384,
                     'K' : 0.367}
 
-            
+        #the different apertures
+        apertype = ['1', '2','3','iso','auto']
+        apertypek = ['1', '2', '3']
+
+        #the different variants of the K-band
+        ktype = ['','_UKIRT']
+
+        #initialize new astropy Table with new columns 
+        self.nc = Table()
         
+        #loop through every band
+        for band in klam:
+
+            #loop through both variants of the K-band
+            if band == 'K':
+                #loop through apertype
+                for aper in apertypek:
+                    #loop through NEWFIRM ('') and UKIRT ('_UKIRT') extensions
+                    for ext in ktype:
+                        fluxstr = 'f' + band + aper + ext
+                        fluxstrebvcor = fluxstr + '_c'
+                        #make a new variable that containst he corrected flux
+                        self.nc[fluxstrebvcor] = self.cat[fluxstr] * 10**(-0.4 * self.cat['ebv'] * klam[band])
+            else:
+                #loop through apertype
+                for aper in apertype:
+                    fluxstr = 'f' + band + aper
+                    fluxstrebvcor = fluxstr + '_c'
+                    #make a new variable that containst he corrected flux
+                    self.nc[fluxstrebvcor] = self.cat[fluxstr] * 10**(0.4 * self.cat['ebv'] * klam[band])
+                
+
+        
+                    
     def galsel(self):
 
         '''
@@ -121,7 +155,8 @@ class complete:
         sampleflag
         '''
             
-        self.mRAUTO = -2.5 * np.log10(self.cat.fRauto) + 23.9
+        #self.mRAUTO = -2.5 * np.log10(self.cat.fRauto) + 23.9
+        self.mRAUTO = -2.5 * np.log10(self.nc['fRauto_c']) + 23.9
         self.starflag = (self.cat.class_StarR>0.98)
         #select galaxies with high quality photometry 
         self.photflag = (self.cat.wK_both>0.3) & (self.cat.sexflagB<=3) & (self.cat.sexflagV<=3) &  (self.cat.sexflagR<=3)&  (self.cat.sexflagI<=3) & ((self.cat.sexflagK <=3) | (self.cat.sexflagK_UKIRT <=3)) & (~self.starflag)
@@ -137,6 +172,30 @@ class complete:
         #self.goodspecflag = self.zflag  & (self.mRAUTO < 22.9)
         print('nphot = ',np.count_nonzero(self.goodphotflag))
         print('nspec =',np.count_nonzero(self.goodspecflag))
+
+    def redcheck(self):
+        '''
+        check redenning correction
+
+
+        '''
+
+        V_R_c = -2.5 * np.log10(self.nc['fV1_c'] / self.nc['fR1_c'])
+        V_R = -2.5 * np.log10(self.cat.fV1 / self.cat.fR1)
+
+        mRAUTO = -2.5 * np.log10(self.cat.fRauto) + 23.9
+        mRAUTOc = -2.5 * np.log10(self.nc['fRauto_c']) + 23.9
+
+        fig,(ax1,ax2) = plt.subplots(1,2,figsize = (16,8))  
+
+        ax1.scatter(V_R[self.goodphotflag], V_R_c[self.goodphotflag] - V_R[self.goodphotflag], alpha=0.1)
+        ax1.set_ylabel(r'(V-R)$_c$ - (V-R)')
+        ax1.set_xlabel('V-R')
+
+        ax2.scatter(mRAUTO[self.goodphotflag], mRAUTOc[self.goodphotflag] - mRAUTO[self.goodphotflag],alpha=0.1)
+        ax2.set_ylabel(r'RAUTO$_c$ - RAUTO')
+        ax2.set_xlabel('RAUTO')
+        
 
     def CMD_compl(self, cluster='all'):
         '''CMD completeness
@@ -173,7 +232,8 @@ class complete:
         print('numspecclust = ', np.count_nonzero(self.goodspec_plotflag))
 
         #make plot of V-R vs. R
-        self.V_R = -2.5 * np.log10(self.cat.fV1 / self.cat.fR1)
+        #self.V_R = -2.5 * np.log10(self.cat.fV1 / self.cat.fR1)
+        self.V_R = -2.5 * np.log10(self.nc['fV1_c'] / self.nc['fR1_c'])
 
         fig,(ax1,ax2) = plt.subplots(1,2,figsize = (16,8))  
 
@@ -210,7 +270,7 @@ class complete:
 
         ax2.tick_params(axis='both', which='major', labelsize=15)
 
-        figname = 'Plots/cmd_' + cluster + '.png'
+        figname = '../Plots/cmd_' + cluster + '.png'
         fig.savefig(figname)
         
 
@@ -259,7 +319,7 @@ class complete:
 
         ax2.tick_params(axis='both', which='major', labelsize=15)
 
-        figname = 'Plots/cmdhist_' + cluster + '.png'
+        figname = '../Plots/cmdhist_' + cluster + '.png'
         fig.savefig(figname)
         #plt.show()
 
@@ -287,7 +347,7 @@ class complete:
 
         ax.tick_params(axis='both', which='major', labelsize=15)
 
-        figname = 'Plots/compl_' + cluster + '.png'
+        figname = '../Plots/compl_' + cluster + '.png'
         fig.savefig(figname)
         plt.show()
 
