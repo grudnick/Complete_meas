@@ -447,6 +447,8 @@ class complete:
     
         #ax1.legend(loc=2,fontsize=18)
         plt.tick_params(axis='both', which='major', labelsize=15)
+        figname = '../Plots/cmd_weights.png'
+        plt.savefig(figname)
         
 
     def compl_write(self):
