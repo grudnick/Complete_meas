@@ -41,27 +41,11 @@ methods to include
 
 TO DO
 
-include galactic extinction
-
 check how CMD histograms compare from field to field
 
 write out global completeness and cluster-by-cluster completeness.  Do
 this only for the CMD version
 
-----------------------
-**CMD completeness
-
-input: total cat, sample flag
-cluster: default all, can input name
-
-make 2D binned histogram of V-R vs. R for all photometric sources
-
-make 2D binned histogram of V-R vs. R for all targets with a Q=3 or 4 spectrum (or real spectrum)
-
-take ratio of these to compute completeness
-
-returns
-completeness CMD 2D array with bin edges
 
 ------------------------
 **radial completeness
@@ -96,13 +80,34 @@ class complete:
     
     def __init__(self, ldppath):
         catname = ldppath + 'v7.2/megacat_v7.2a.fits'
-        self.cat = fits.getdata(catname)
-       
+        self.catdat, self.cathdr = fits.getdata(catname,header = True)
+        self.cat = Table(self.catdat)
+        #hdul = fits.open(catname)
+        #cat = hdul[1].data
+        #cathdr = hdul[0].header
+        
 
-        #correct for galactic extinction
+    def mwextcor(self):
+
+        '''
+
+        PURPOSE: 
+
+        correct the full flux catalog for galactic extinction
         #use the following formula F_obs(Lambda) = F_0(Lambda) * 10^(-0.4 * EBV * K(Lambda))
         #Calzetti+97 https://arxiv.org/pdf/astro-ph/9706121.pdf
-        klam = {'B' : 4.125,
+
+        ebv values have already been tabulated for each source
+
+        INPUT:
+        The full flux catalog
+
+        OUTPUT:
+        A new astropy table that contains corrected fluxs with the '_c' extension for every aperture.
+
+
+        '''
+        self.klam = {'B' : 4.125,
                     'V' : 3.060,
                     'R' : 2.548,
                     'I' : 1.993,
@@ -120,29 +125,48 @@ class complete:
         self.nc = Table()
         
         #loop through every band
-        for band in klam:
+        for band in self.klam:
 
             #loop through both variants of the K-band
             if band == 'K':
-                #loop through apertype
+                #loop through apertypek as there are different
+                #aperture types for the k-band (not sure why but there
+                #are)
                 for aper in apertypek:
                     #loop through NEWFIRM ('') and UKIRT ('_UKIRT') extensions
                     for ext in ktype:
-                        fluxstr = 'f' + band + aper + ext
-                        fluxstrebvcor = fluxstr + '_c'
-                        #make a new variable that containst he corrected flux
-                        self.nc[fluxstrebvcor] = self.cat[fluxstr] * 10**(-0.4 * self.cat['ebv'] * klam[band])
+                        self.fluxcor(band,aper,ext)
             else:
                 #loop through apertype
+                ext = ''
                 for aper in apertype:
-                    fluxstr = 'f' + band + aper
-                    fluxstrebvcor = fluxstr + '_c'
-                    #make a new variable that containst he corrected flux
-                    self.nc[fluxstrebvcor] = self.cat[fluxstr] * 10**(0.4 * self.cat['ebv'] * klam[band])
-                
+                    self.fluxcor(band,aper,ext)
 
-        
-                    
+                
+    def fluxcor(self,band,aper,ext):
+        '''
+        correct the fluxes and errors for galactic extinction for a
+        single band and aperture combination.
+
+        The 'ext' parameter is only important for the UKIRT data
+
+        '''
+
+        #make a new variable that contains the corrected flux
+        fluxstr = 'f' + band + aper + ext
+        fluxstrebvcor = fluxstr + '_c'
+        self.nc[fluxstrebvcor] = self.cat[fluxstr] * 10**(0.4 * self.cat['ebv'] * self.klam[band])
+
+        #make a new variable that contains the corrected flux errors
+        errfluxstr = 'f' + band + aper + 'err' + ext
+        errfluxstrebvcor = 'f' + band + aper + 'err' + ext + '_c'
+        self.nc[errfluxstrebvcor] = self.cat[errfluxstr] * 10**(0.4 * self.cat['ebv'] * self.klam[band])
+
+        #replace values with no data with their original values
+        noflux = np.where(self.cat[errfluxstr] < 0.)
+        self.nc[fluxstrebvcor][noflux] = self.cat[fluxstr][noflux]
+        self.nc[errfluxstrebvcor][noflux] = self.cat[errfluxstr][noflux]
+
     def galsel(self):
 
         '''
@@ -157,13 +181,13 @@ class complete:
             
         #self.mRAUTO = -2.5 * np.log10(self.cat.fRauto) + 23.9
         self.mRAUTO = -2.5 * np.log10(self.nc['fRauto_c']) + 23.9
-        self.starflag = (self.cat.class_StarR>0.98)
+        self.starflag = (self.cat['class_StarR']>0.98)
         #select galaxies with high quality photometry 
-        self.photflag = (self.cat.wK_both>0.3) & (self.cat.sexflagB<=3) & (self.cat.sexflagV<=3) &  (self.cat.sexflagR<=3)&  (self.cat.sexflagI<=3) & ((self.cat.sexflagK <=3) | (self.cat.sexflagK_UKIRT <=3)) & (~self.starflag)
+        self.photflag = (self.cat['wK_both']>0.3) & (self.cat['sexflagB']<=3) & (self.cat['sexflagV']<=3) &  (self.cat['sexflagR']<=3)&  (self.cat['sexflagI']<=3) & ((self.cat['sexflagK'] <=3) | (self.cat['sexflagK_UKIRT'] <=3)) & (~self.starflag)
         print('nphot_all = ', np.count_nonzero(self.photflag))
 
         #select galaxies with high quality spectroscopic redshifts 
-        self.zflag = ((self.cat.zGAL_new_ORIGIN=='LDP') & (self.cat.Q >=3)) | (self.cat.zGAL_new_ORIGIN=='FORS') | (self.cat.zGAL_new_ORIGIN=='HS')
+        self.zflag = ((self.cat['zGAL_new_ORIGIN']=='LDP') & (self.cat['Q'] >=3)) | (self.cat['zGAL_new_ORIGIN']=='FORS') | (self.cat['zGAL_new_ORIGIN']=='HS')
         print('nspec_all = ', np.count_nonzero(self.zflag))
         
         #add spectroscopic completness limit
@@ -181,23 +205,28 @@ class complete:
         '''
 
         V_R_c = -2.5 * np.log10(self.nc['fV1_c'] / self.nc['fR1_c'])
-        V_R = -2.5 * np.log10(self.cat.fV1 / self.cat.fR1)
+        V_R = -2.5 * np.log10(self.cat['fV1'] / self.cat['fR1'])
 
-        mRAUTO = -2.5 * np.log10(self.cat.fRauto) + 23.9
+        mRAUTO = -2.5 * np.log10(self.cat['fRauto']) + 23.9
         mRAUTOc = -2.5 * np.log10(self.nc['fRauto_c']) + 23.9
 
-        fig,(ax1,ax2) = plt.subplots(1,2,figsize = (16,8))  
+        fig,(ax1,ax2) = plt.subplots(1,2,figsize = (8,4))  
 
-        ax1.scatter(V_R[self.goodphotflag], V_R_c[self.goodphotflag] - V_R[self.goodphotflag], alpha=0.1)
+        ax1.scatter(V_R_c[self.goodphotflag], V_R_c[self.goodphotflag] - V_R[self.goodphotflag], alpha=0.1)
+        ax1.set_xlim(-1,2)
         ax1.set_ylabel(r'(V-R)$_c$ - (V-R)')
-        ax1.set_xlabel('V-R')
+        ax1.set_xlabel('(V-R)_c')
 
         ax2.scatter(mRAUTO[self.goodphotflag], mRAUTOc[self.goodphotflag] - mRAUTO[self.goodphotflag],alpha=0.1)
         ax2.set_ylabel(r'RAUTO$_c$ - RAUTO')
         ax2.set_xlabel('RAUTO')
-        
 
-    def CMD_compl(self, cluster='all'):
+        fig,ax = plt.subplots(1,1,figsize = (4,4))
+        ax.scatter(mRAUTOc[self.goodphotflag],V_R_c[self.goodphotflag] - V_R[self.goodphotflag], alpha=0.1)
+        ax.set_ylabel(r'(V-R)$_c$ - (V-R)')
+        ax.set_xlabel('RAUTO')
+
+    def CMD_compl(self, cluster='all', debug = False):
         '''CMD completeness
 
         INPUT: 
@@ -218,9 +247,9 @@ class complete:
 
         #select the right cluster
         if(cluster=='all'):
-            self.clustflag = (self.cat.FIELD!='None')
+            self.clustflag = (self.cat['FIELD']!='None')
         else:
-            self.clustflag = (self.cat.FIELD==cluster)
+            self.clustflag = (self.cat['FIELD']==cluster)
 
         print('numclust = ', np.count_nonzero(self.clustflag))
         #print('numphot = ', np.count_nonzero(self.goodphotflag))
@@ -235,7 +264,7 @@ class complete:
         #self.V_R = -2.5 * np.log10(self.cat.fV1 / self.cat.fR1)
         self.V_R = -2.5 * np.log10(self.nc['fV1_c'] / self.nc['fR1_c'])
 
-        fig,(ax1,ax2) = plt.subplots(1,2,figsize = (16,8))  
+        fig,(ax1,ax2) = plt.subplots(1,2,figsize = (8,4))  
 
         #plt.figure(figsize=(8,6))
         #ax=plt.gca()
@@ -277,8 +306,10 @@ class complete:
         ##############
         #compute 2D histogram 
         #set up panel for histograms
-        fig,(ax1,ax2) = plt.subplots(1,2,figsize = (16,8))
+        fig,(ax1,ax2) = plt.subplots(1,2,figsize = (8,4))
 
+        #set boundaries of histogram for completeness.  mRAUTO=22.9 is
+        #the spectroscopic completeness as estimated in Just+19
         self.magedges = np.arange(15.9,23.9,0.5)
         self.coledges = np.arange(-0.5,2.0,0.25)
 
@@ -330,7 +361,10 @@ class complete:
         zerophot = np.where(histphot<10)
         self.completehist[zerophot] = 0
 
-        fig,ax = plt.subplots(1,1,figsize = (8,8))
+        if debug:
+            self.completehist[3,4] = 0.7
+        
+        fig,ax = plt.subplots(1,1,figsize = (4,4))
         im = ax.pcolormesh(xspec, yspec, self.completehist,vmin=0,vmax = 0.6)
         cb = fig.colorbar(im,ax=ax)
         #cb.set_label(label=r'log$_{10}$ N',fontsize=15)
@@ -351,7 +385,85 @@ class complete:
         fig.savefig(figname)
         plt.show()
 
+
+    def CMD_compl_assign(self):
+        '''CMD_compl_assign
+
+        for every galaxy find its closes cell in the global and
+        field-by-field completeness histogram and add the completeness
+        value for that galaxy.
+
+        OUTPUT:
+
+        The original catalog with a new completeness column
+
+        PROCESS:
+
+        Loop through every CMD bin.  Find all galaxies in that bin and
+        assign them the appropriate completeness
+        '''
+
+        #initialize weight column
+        self.w_cmd = np.zeros(len(self.cat))
+        #print(self.w_cmd)
+
+        #loop over magnitude bins
+        for imag,magbright in enumerate(self.magedges):
+            #only go to second to last edge so that we can access the final bin and not beyond
+            if imag < len(self.magedges) - 1:
+                magfaint = self.magedges[imag+1]
+
+                #loop over color bins
+                for icol, colblue in enumerate(self.coledges):
+                    if icol < len(self.coledges) - 1:
+                        colred = self.coledges[icol + 1]
+
+                        #find all galaxies in this 
+                        #galbinflag = (self.mRAUTO <= magbright) & (self.mRAUTO > magfaint) & (self.V_R  >= colblue) & (self.V_R < colred)
+                        galbinflag = (self.mRAUTO >= magbright) & (self.mRAUTO < magfaint) & (self.V_R  >= colblue) & (self.V_R < colred)
+                        
+                        #print('Ngal selected = ',np.count_nonzero(galbinflag))
+                        #now assign the appropriate weight to every galaxy in that bin 
+                        self.w_cmd[galbinflag] = self.completehist[icol,imag]
+                        #print('mag = ',self.magedges[imag], '; magfaint = ', magfaint, 'magbright = ', magbright, '; col = ',self.coledges[icol], self.completehist[icol,imag])
+                        #print('w_cmd[galbinflag] = ', self.w_cmd[galbinflag])
+
+        self.cat['w_cmd'] = self.w_cmd
+
+        plt.figure(figsize = (6,6))
+        plt.scatter(self.mRAUTO[self.goodphot_plotflag], self.V_R[self.goodphot_plotflag],alpha=1, c=self.cat['w_cmd'][self.goodphot_plotflag])
+        cb = plt.colorbar()
+        cb.set_label(label=r'$w_{cmd}$',fontsize=15)
+
+        #plt.scatter(self.mRAUTO[self.goodphotflag], self.V_R[self.goodphotflag])
+
+        plt.xlim(23.3,15)
+        plt.ylim(-1,2)
+    
+        plt.ylabel(r'V-R',fontsize=20)
+        plt.xlabel(r'$R_{AUTO}$',fontsize=20)
+        plt.title('Phot',fontsize=20)
+        #plt.text(18,1.6,s=cluster,fontsize=20)
+    
+        #ax1.legend(loc=2,fontsize=18)
+        plt.tick_params(axis='both', which='major', labelsize=15)
+        
+
+    def compl_write(self):
+        '''compl_write
+
+        write an updated catalog with completeness weights
+
+        OUTPUT:
+
+        A fits file with the added completeness column
+
+        '''
+        catcomplname = ldppath + 'v7.2/megacat_v7.2a_compl.fits'
+        self.cat.write(catcomplname, overwrite=True)
+        
         
 if __name__ == '__main__':
     c = complete(ldppath)
+    c.mwextcor()
     c.galsel()
