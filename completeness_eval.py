@@ -47,21 +47,6 @@ write out global completeness and cluster-by-cluster completeness.  Do
 this only for the CMD version
 
 
-------------------------
-**radial completeness
-
-input: total cat, sample flag
-cluster: default all, can input name
-
-Make radial histogram for all photometric sources
-
-make radial histogram for all targets with a Q=3 or 4 spectrum (or real spectrum)
-
-take ratio of these to compute completeness
-
-returns
-completeness radial 1D array with bin edges
-
 ---------------------------
 **assign completeness weights
 
@@ -229,17 +214,17 @@ class complete:
     def CMD_compl(self, cluster='all', debug = False):
         '''CMD completeness
 
+       WHAT IT DOES:
+        make 1D histogram of cluster-centric radii for all photometric sources
+
+        make 1D histogram of cluster-centric radii for all targets with a Q=3 or 4 spectrum (or real spectrum)
+
+        take ratio of these to compute completeness as a function or radius
+
         INPUT: 
         total cat
         sample flag
         cluster: default all, can input name
-
-        WHAT IT DOES:
-        make 2D binned histogram of V-R vs. R for all photometric sources
-
-        make 2D binned histogram of V-R vs. R for all targets with a Q=3 or 4 spectrum (or real spectrum)
-
-        take ratio of these to compute completeness
 
         RETURNS
         completeness CMD 2D array with bin edges
@@ -247,7 +232,7 @@ class complete:
 
         #select the right cluster
         if(cluster=='all'):
-            self.clustflag = (self.cat['FIELD']!='None')
+            self.clustflag = (self.cat['FIELD']!='None') & (self.cat['FIELD']!='1059-12') & (self.cat['FIELD']!='1103-12') & (self.cat['FIELD']!='1420-12')
         else:
             self.clustflag = (self.cat['FIELD']==cluster)
 
@@ -451,6 +436,185 @@ class complete:
         plt.savefig(figname)
         
 
+    def rad_compl(self, cluster='all', debug = False):
+        '''RADIAL COMPLETENESS
+
+       WHAT IT DOES:
+        make 1D histogram of cluster-centric radii for all photometric sources
+
+        make 1D histogram of cluster-centric radii for all targets with a Q=3 or 4 spectrum (or real spectrum)
+
+        take ratio of these to compute completeness as a function or radius
+
+        Radial bins will have width degrees, as it will depend on size of the mask and the sampling rate, which are both angular quantities.
+
+        INPUT: 
+        total cat
+        sample flag
+        cluster: default all, can input name
+
+        RETURNS
+        completeness radial 1D array with bin edges
+        '''
+
+        #select the right cluster
+        if(cluster=='all'):
+            self.clustflag = (self.cat['FIELD']!='None') & (self.cat['FIELD']!='1059-12') & (self.cat['FIELD']!='1103-12') & (self.cat['FIELD']!='1420-12')
+        else:
+            self.clustflag = (self.cat['FIELD']==cluster)
+
+        print('numclust = ', np.count_nonzero(self.clustflag))
+        #print('numphot = ', np.count_nonzero(self.goodphotflag))
+        #print('numspec = ', np.count_nonzero(self.goodspecflag))
+
+        self.goodphot_plotflag = self.goodphotflag & self.clustflag
+        self.goodspec_plotflag = self.goodspecflag & self.clustflag
+        print('numphotclust = ', np.count_nonzero(self.goodphot_plotflag))
+        print('numspecclust = ', np.count_nonzero(self.goodspec_plotflag))
+
+        #compute 1D histogram 
+        #set up panel for histograms
+        fig,(ax1,ax2) = plt.subplots(1,2,figsize = (8,4))
+
+        #parameters set boundaries of histogram for completeness.
+        #Assume that a mask is 0.2 deg in radius.  We want to go
+        #further than this because clusters were targeted by 2-3
+        #masks.
+        rmin = 0.0
+        rmax = 0.4
+        dr = 0.05
+        self.rad_edges = np.arange(rmin, rmax, dr)
+
+        #compute cluster-centric radius
+        self.clustcent_comp()
+
+        #make histogram of photometric sources
+        self.radhist_phot = ax1.hist(self.bcgdist[self.goodphot_plotflag], self.rad_edges, label = 'Phot')
+        ax1.set_xlim([self.rad_edges[0], self.rad_edges[-1]])
+        ax1.set_xlabel('BCG distance [deg]',fontsize=20)
+        ax1.set_ylabel('N',fontsize=20)
+        ax1.set_title(cluster,fontsize=20)
+        #ax1.text(self.rad_edges[-2], max(radhist_phot) * 0.8 ,s=cluster,fontsize=20)
+        ax1.tick_params(axis='both', which='major', labelsize=15)
+
+        #make histogram of spectroscopic  sources
+        self.radhist_spec = ax1.hist(self.bcgdist[self.goodspec_plotflag], self.rad_edges, label = 'Spec')
+        #ax2.set_xlim([self.rad_edges[0], self.rad_edges[-1]])
+        #ax2.set_xlabel('BCG distance [deg]')
+        #ax2.set_title('Spec',fontsize=20)
+        #ax2.text(self.rad_edges[-2], max(radhist_phot) * 0.8 ,s=cluster,fontsize=20)
+        #ax2.tick_params(axis='both', which='major', labelsize=15)
+        ax1.legend(loc=2,fontsize=18)
+
+        #compute completeness
+        self.rad_completehist = np.array(self.radhist_spec[0]) / np.array(self.radhist_phot[0])
+        self.radbin_cent = self.rad_edges + dr/2
+        ax2.plot(self.radbin_cent[0:-1], self.rad_completehist,'bo',markersize=10,label = 'completeness')
+        ax2.set_xlim([self.rad_edges[0], self.rad_edges[-1]])
+        ax2.set_xlabel('BCG distance [deg]',fontsize=20)
+        ax2.set_ylabel(r'$N_{spec} / N_{phot}$',fontsize=20)
+        ax2.set_title(cluster,fontsize=20)
+        ax2.tick_params(axis='both', which='major', labelsize=15)
+        ax2.tick_params(axis='both', which='major', labelsize=15)
+        fig.tight_layout()
+        
+        figname = '../Plots/rad_complete.png'
+        plt.savefig(figname)
+
+
+    def clustcent_comp(self):
+        '''
+        Compute cluster centric radii
+
+        INPUT:
+        Catalog
+
+        RETURNS:
+        Clustercentric radius in degrees
+        '''
+
+        #BCG coordinates in decimal degrees.  
+        BCGcoord = {'1018-12' : [154.6917, -12.197778],
+                        '1037-12' : [159.4625, -12.72389],
+                        '1040-11' : [160.16667, -11.9344],
+                        '1054-11' : [163.6, -11.77194],
+                        '1054-12' : [163.6792, -12.7642],
+                        '1138-11' : [174.54217, -11.5603],
+                        '1216-12' : [184.1875, -12.0214],
+                        '1227-11' : [186.9917, -11.5869],
+                        '1232-12' : [188.125, -12.8433],
+                        '1301-11' : [195.4167, -11.6561],
+                        '1353-11' : [208.2542, -11.6244],
+                        '1354-12' : [208.5375, -12.5169],
+                        '1411-11' : [212.76667, -11.8078]}
+
+        #initialize bcgdist
+        self.bcgdist = np.zeros(len(self.cat))
+
+        #loop through every cluster and compute distance
+        for clustname  in BCGcoord:
+            clustflag = (self.cat['FIELD']==clustname)
+            self.dra = (BCGcoord[clustname][0] - self.cat['ra']) 
+            self.ddec = BCGcoord[clustname][1] - self.cat['dec']
+
+            self.bcgdist[clustflag] = np.sqrt((self.dra[clustflag] * np.cos(BCGcoord[clustname][1] * np.pi / 180.))**2  + self.ddec[clustflag]**2)
+        
+    def rad_compl_assign(self):
+        '''rad_compl_assign
+
+        for every galaxy find its closes cell in the global or
+        field-by-field radial completeness histogram and construct the completeness
+        value for that galaxy.
+
+        OUTPUT:
+       
+        The original catalog with a new completeness column
+
+        PROCESS:
+
+        Loop through every radial bin.  Find all galaxies in that bin and
+        assign them the appropriate completeness
+        '''
+
+        #initialize weight column
+        self.w_rad = np.zeros(len(self.cat))
+        #print(self.w_cmd)
+
+        #loop over magnitude bins
+        for irad,radlow in enumerate(self.rad_edges):
+            #only go to second to last edge so that we can access the final bin and not beyond
+            if irad < len(self.rad_edges) - 1:
+                radhigh = self.rad_edges[irad+1]
+               
+                galbinflag = (self.bcgdist >= radlow) & (self.bcgdist < radhigh)
+                        
+                #print('Ngal selected = ',np.count_nonzero(galbinflag))
+                #now assign the appropriate weight to every galaxy in that bin 
+                self.w_rad[galbinflag] = self.rad_completehist[irad]
+
+        self.cat['w_rad'] = self.w_rad
+
+        plt.figure(figsize = (6,6))
+        plt.scatter(self.dra[self.goodphot_plotflag], self.ddec[self.goodphot_plotflag],alpha=1, c=self.cat['w_rad'][self.goodphot_plotflag])
+        cb = plt.colorbar()
+        cb.set_label(label=r'$w_{rad}$',fontsize=15)
+
+        #plt.scatter(self.mRAUTO[self.goodphotflag], self.V_R[self.goodphotflag])
+
+        plt.xlim(-0.3,0.3)
+        plt.ylim(-0.3,0.3)
+    
+        plt.ylabel(r'$\Delta$ DEC',fontsize=20)
+        plt.xlabel(r'$\Delta$ RA',fontsize=20)
+        plt.title('Phot',fontsize=20)
+        #plt.text(18,1.6,s=cluster,fontsize=20)
+    
+        #ax1.legend(loc=2,fontsize=18)
+        plt.tick_params(axis='both', which='major', labelsize=15)
+        figname = '../Plots/rad_weights.png'
+        plt.savefig(figname)
+        
+
     def compl_write(self):
         '''compl_write
 
@@ -461,7 +625,7 @@ class complete:
         A fits file with the added completeness column
 
         '''
-        catcomplname = ldppath + 'v7.2/megacat_v7.2a_compl.fits'
+        catcomplname = ldppath + 'v7.2/megacat_v7.2a_compl.v2.fits'
         self.cat.write(catcomplname, overwrite=True)
         
         
